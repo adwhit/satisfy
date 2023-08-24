@@ -1,8 +1,27 @@
-use std::path::Path;
+use clap::Parser;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 
-fn main() {}
+#[derive(Parser)]
+struct Args {
+    cnf: PathBuf,
+}
+
+fn main() -> Result<()> {
+    let args = Args::parse();
+    let cnf = read_cnf_from_file(args.cnf)?;
+    match Solver::new(cnf).solve() {
+        Some(res) => {
+            println!("SAT");
+            for r in res {
+                print!("{r} ");
+            }
+        }
+        None => println!("UNSAT"),
+    }
+    Ok(())
+}
 
 struct Clause {
     literals: Vec<i16>,
@@ -47,6 +66,10 @@ fn parse_cnf(file: &str) -> Result<Cnf> {
             n_clauses = nclauses.parse::<usize>()?;
             in_header = false
         } else {
+            if line.starts_with("%") {
+                // we're done, apparently
+                break;
+            }
             let mut lits: Vec<_> = parts
                 .map(|part| part.parse::<i16>())
                 .collect::<std::result::Result<_, _>>()?;
@@ -98,10 +121,10 @@ impl Solver {
     }
 
     fn n_vars(&self) -> usize {
-        dbg!(self.var_lookup.len())
+        self.var_lookup.len()
     }
 
-    fn solve(&mut self) -> Vec<i16> {
+    fn solve(&mut self) -> Option<Vec<i16>> {
         let mut assigned: Vec<Assign> = std::iter::repeat(Assign::Unassigned)
             .take(self.n_vars())
             .collect();
@@ -111,10 +134,9 @@ impl Solver {
             trail: Vec::new(),
         };
         'solve: loop {
-            println!("{assignment:?}");
+            println!("assignment: {assignment:?}");
             match self.check_and_propagate(&assignment) {
                 Some(propagations) => {
-                    assert!(propagations.len() < 2);
                     if propagations.is_empty() {
                         // make a decision
                         for v in 1..self.n_vars() + 1 {
@@ -132,14 +154,21 @@ impl Solver {
                             })
                             .collect();
 
-                        return out;
+                        return Some(out);
                     } else {
-                        assignment.add_propagations(propagations);
+                        if !assignment.add_propagations(dbg!(propagations)) {
+                            // propagations are contradictory
+                            if !self.backtrack(&mut assignment) {
+                                return None;
+                            }
+                        }
                     }
                 }
                 None => {
                     // failed!
-                    panic!()
+                    if !self.backtrack(&mut assignment) {
+                        return None;
+                    }
                 }
             }
         }
@@ -147,7 +176,6 @@ impl Solver {
 
     fn check_and_propagate(&self, assign: &Assignment) -> Option<Vec<UnitPropagate>> {
         let latest = assign.latest_assignment();
-        println!("{latest:?}");
         if latest.is_empty() {
             check_clauses_and_propagate(assign, self.clauses.iter().enumerate())
         } else {
@@ -158,6 +186,22 @@ impl Solver {
             });
             check_clauses_and_propagate(assign, iter)
         }
+    }
+
+    fn backtrack(&mut self, assign: &mut Assignment) -> bool {
+        println!("Backtrack!");
+        while let Some(pop) = assign.pop() {
+            match pop {
+                Action::Decision(lit) => {
+                    if lit > 0 {
+                        assign.add_decision(lit * -1);
+                        return true;
+                    }
+                }
+                Action::UnitPropagate(_) => {}
+            }
+        }
+        false
     }
 }
 
@@ -241,20 +285,30 @@ impl Assignment {
         }
     }
 
-    fn add_propagations(&mut self, props: Vec<UnitPropagate>) {
+    fn add_propagations(&mut self, props: Vec<UnitPropagate>) -> bool {
         for p in &props {
-            assert_eq!(self.assigned[p.lit.abs() as usize - 1], Assign::Unassigned);
+            assert!(p.lit != 0);
+            let to_assign = if p.lit > 0 {
+                Assign::True
+            } else {
+                Assign::False
+            };
+            match self.assigned[p.lit.abs() as usize - 1] {
+                Assign::Unassigned => {}
+                x if x != to_assign => return false, // bad!
+                _ => continue,                       // already done
+            }
             self.assigned[p.lit.abs() as usize - 1] = if p.lit < 0 {
                 Assign::False
             } else {
                 Assign::True
             };
         }
-        self.trail.push(Action::UnitPropagate(props))
+        self.trail.push(Action::UnitPropagate(props));
+        true
     }
 
     fn add_decision(&mut self, decision: i16) {
-        println!("decide");
         assert_eq!(
             self.assigned[decision.abs() as usize - 1],
             Assign::Unassigned
@@ -267,6 +321,22 @@ impl Assignment {
 
         self.trail.push(Action::Decision(decision))
     }
+
+    fn pop(&mut self) -> Option<Action> {
+        let pop = self.trail.pop();
+        match pop {
+            Some(Action::Decision(lit)) => {
+                self.assigned[lit.abs() as usize - 1] = Assign::Unassigned;
+            }
+            Some(Action::UnitPropagate(ref props)) => {
+                for p in props.iter() {
+                    self.assigned[p.lit.abs() as usize - 1] = Assign::Unassigned;
+                }
+            }
+            None => {}
+        };
+        pop
+    }
 }
 
 #[cfg(test)]
@@ -274,13 +344,18 @@ mod tests {
     use super::*;
 
     fn solve(s: &str) -> Vec<i16> {
-        let cnf = parse_cnf(
-            "
-            p cnf 1 0
-            ",
-        )
-        .unwrap();
-        Solver::new(cnf).solve()
+        let cnf = parse_cnf(s).unwrap();
+        Solver::new(cnf).solve().unwrap()
+    }
+
+    fn solve_file(p: impl AsRef<Path>) {
+        let cnf = read_cnf_from_file(p).unwrap();
+        Solver::new(cnf).solve().unwrap();
+    }
+
+    fn unsolve(s: &str) {
+        let cnf = parse_cnf(s).unwrap();
+        assert!(Solver::new(cnf).solve().is_none())
     }
 
     #[test]
@@ -324,25 +399,122 @@ mod tests {
     }
 
     #[test]
-    fn test_solve_simple() {
+    fn test_solve_simple_1() {
         let res = solve(
             "
             p cnf 1 1
-            -1 0
+            1 0
             ",
         );
         assert_eq!(res, &[1]);
     }
 
     #[test]
-    fn test_solve_simple_2() {
+    fn test_solve_simple_n1() {
         let res = solve(
+            "
+            p cnf 1 1
+            -1 0
+            ",
+        );
+        assert_eq!(res, &[-1]);
+    }
+
+    #[test]
+    fn test_unsolve_simple() {
+        unsolve(
             "
             p cnf 1 2
             -1 0
             1 0
             ",
+        )
+    }
+
+    #[test]
+    fn test_solve_2() {
+        let res = solve(
+            "
+            p cnf 2 2
+            1 2 0
+            -1 2 0
+            ",
         );
-        assert_eq!(res, &[1]);
+        assert_eq!(res, &[1, 2]);
+    }
+
+    #[test]
+    fn test_solve_2x10() {
+        let res = solve(
+            "
+            p cnf 2 10
+            1 2 0
+            1 2 0
+            1 2 0
+            1 2 0
+            1 2 0
+            -1 2 0
+            -1 2 0
+            -1 2 0
+            -1 2 0
+            -1 2 0
+            ",
+        );
+        assert_eq!(res, &[1, 2]);
+    }
+
+    #[test]
+    fn test_solve_5x0() {
+        let res = solve(
+            "
+            p cnf 5 0
+            ",
+        );
+        assert_eq!(res, &[1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_solve_3() {
+        let res = solve(
+            "
+            p cnf 3 3
+            -1 -2 -3 0
+            2 0
+            3 0
+            ",
+        );
+        assert_eq!(res, &[-1, 2, 3]);
+    }
+
+    #[test]
+    fn test_solve_backtrack_2() {
+        let res = solve(
+            "
+            p cnf 2 2
+            -1 2 0
+            -1 -2 0
+            ",
+        );
+        assert_eq!(res, &[-1, 2]);
+    }
+
+    #[test]
+    fn test_unsolve_tut() {
+        unsolve(
+            "
+            p cnf 5 6
+            1 -2 0
+            1 -3 -4 0
+            -1 -3 -4 0
+            -3 -5 0
+            -3 5 0
+            3 4 0
+            ",
+        );
+    }
+
+    #[test]
+    fn test_solve_benchmark_1() {
+        solve_file("uf20-91/uf20-01.cnf");
     }
 }

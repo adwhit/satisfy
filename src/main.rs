@@ -125,7 +125,7 @@ impl Solver {
     }
 
     fn solve(&mut self) -> Option<Vec<i16>> {
-        let mut assigned: Vec<Assign> = std::iter::repeat(Assign::Unassigned)
+        let assigned: Vec<Assign> = std::iter::repeat(Assign::Unassigned)
             .take(self.n_vars())
             .collect();
 
@@ -156,7 +156,8 @@ impl Solver {
 
                         return Some(out);
                     } else {
-                        if !assignment.add_propagations(dbg!(propagations)) {
+                        println!("Got propagations {propagations:?}");
+                        if !assignment.add_propagations(propagations) {
                             // propagations are contradictory
                             if !self.backtrack(&mut assignment) {
                                 return None;
@@ -235,16 +236,21 @@ fn check_clauses_and_propagate<'a>(
                 }
             }
         }
-        if let Some(unit) = unit {
-            // we have a unit-propagation!
-            propagations.push(UnitPropagate {
-                clause: clause_ix,
-                lit: unit,
-            });
-        } else if !seen_true {
-            // we are not unit and the clause is false,
-            // so - assignment has failed!
-            return None;
+        if seen_true {
+            // we are fine, carry on
+            continue;
+        } else {
+            if let Some(unit) = unit {
+                // we have a unit-propagation!
+                propagations.push(UnitPropagate {
+                    clause: clause_ix,
+                    lit: unit,
+                });
+            } else {
+                // we are not unit and the clause is false,
+                // so - assignment has failed!
+                return None;
+            }
         }
     }
     // if we get this far, all is well
@@ -285,7 +291,16 @@ impl Assignment {
         }
     }
 
-    fn add_propagations(&mut self, props: Vec<UnitPropagate>) -> bool {
+    fn add_propagations(&mut self, mut props: Vec<UnitPropagate>) -> bool {
+        props.sort_by_key(|k| k.lit.abs());
+        for pairs in props.windows(2) {
+            let l = pairs[0];
+            let r = pairs[0];
+            if l.lit.abs() == r.lit.abs() && l.lit != r.lit {
+                // contradiction
+                return false;
+            }
+        }
         for p in &props {
             assert!(p.lit != 0);
             let to_assign = if p.lit > 0 {
@@ -293,16 +308,7 @@ impl Assignment {
             } else {
                 Assign::False
             };
-            match self.assigned[p.lit.abs() as usize - 1] {
-                Assign::Unassigned => {}
-                x if x != to_assign => return false, // bad!
-                _ => continue,                       // already done
-            }
-            self.assigned[p.lit.abs() as usize - 1] = if p.lit < 0 {
-                Assign::False
-            } else {
-                Assign::True
-            };
+            self.assigned[p.lit.abs() as usize - 1] = to_assign;
         }
         self.trail.push(Action::UnitPropagate(props));
         true
@@ -335,6 +341,7 @@ impl Assignment {
             }
             None => {}
         };
+        println!("popped - {pop:?}\nafter pop: {self:?}");
         pop
     }
 }
@@ -350,12 +357,14 @@ mod tests {
 
     fn solve_file(p: impl AsRef<Path>) {
         let cnf = read_cnf_from_file(p).unwrap();
-        Solver::new(cnf).solve().unwrap();
+        Solver::new(cnf).solve().expect("expected SAT, got UNSAT");
     }
 
     fn unsolve(s: &str) {
         let cnf = parse_cnf(s).unwrap();
-        assert!(Solver::new(cnf).solve().is_none())
+        if let Some(res) = Solver::new(cnf).solve() {
+            panic!("SAT: {res:?}");
+        }
     }
 
     #[test]
@@ -500,7 +509,7 @@ mod tests {
 
     #[test]
     fn test_unsolve_tut() {
-        unsolve(
+        let res = solve(
             "
             p cnf 5 6
             1 -2 0
@@ -511,10 +520,49 @@ mod tests {
             3 4 0
             ",
         );
+        assert_eq!(res, &[1, 2, -3, 4, 5])
     }
 
     #[test]
-    fn test_solve_benchmark_1() {
-        solve_file("uf20-91/uf20-01.cnf");
+    fn test_solve_m() {
+        let res = solve(
+            "
+            p cnf 9 6
+            1 6 7 8 0 
+            2 0
+            3 5 0
+            4 0
+            9 0
+            -2 -3 0
+            ",
+        );
+        assert_eq!(res, &[1, 2, -3, 4, 5, 6, 7, 8, 9])
+    }
+
+    use test_case::test_case;
+
+    #[test_case(1)]
+    #[test_case(2)]
+    #[test_case(3)]
+    #[test_case(4)]
+    #[test_case(5)]
+    #[test_case(6)]
+    #[test_case(7)]
+    #[test_case(8)]
+    #[test_case(9)]
+    #[test_case(10)]
+    #[test_case(11)]
+    #[test_case(12)]
+    #[test_case(13)]
+    #[test_case(14)]
+    #[test_case(15)]
+    #[test_case(16)]
+    #[test_case(17)]
+    #[test_case(18)]
+    #[test_case(19)]
+    #[test_case(20)]
+    fn test_solve_benchmark(n: u8) {
+        let file = dbg!(format!("uf20-91/uf20-0{n}.cnf"));
+        solve_file(file);
     }
 }

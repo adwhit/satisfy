@@ -134,7 +134,7 @@ impl Solver {
             trail: Vec::new(),
         };
         'solve: loop {
-            println!("assignment: {assignment:?}");
+            // println!("assignment: {assignment:?}");
             match self.check_and_propagate(&assignment) {
                 Some(propagations) => {
                     if propagations.is_empty() {
@@ -156,7 +156,7 @@ impl Solver {
 
                         return Some(out);
                     } else {
-                        println!("Got propagations {propagations:?}");
+                        // println!("Got propagations {propagations:?}");
                         if !assignment.add_propagations(propagations) {
                             // propagations are contradictory
                             if !self.backtrack(&mut assignment) {
@@ -190,7 +190,7 @@ impl Solver {
     }
 
     fn backtrack(&mut self, assign: &mut Assignment) -> bool {
-        println!("Backtrack!");
+        // println!("Backtrack!");
         while let Some(pop) = assign.pop() {
             match pop {
                 Action::Decision(lit) => {
@@ -341,7 +341,7 @@ impl Assignment {
             }
             None => {}
         };
-        println!("popped - {pop:?}\nafter pop: {self:?}");
+        // println!("popped - {pop:?}\nafter pop: {self:?}");
         pop
     }
 }
@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_load_cnf() {
-        let cnf = read_cnf_from_file("aim-100.cnf").unwrap();
+        let cnf = read_cnf_from_file("aim-100-1_6-no-1.cnf").unwrap();
         assert_eq!(cnf.n_vars, 100)
     }
 
@@ -541,28 +541,30 @@ mod tests {
 
     use test_case::test_case;
 
-    #[test_case(1)]
-    #[test_case(2)]
-    #[test_case(3)]
-    #[test_case(4)]
-    #[test_case(5)]
-    #[test_case(6)]
-    #[test_case(7)]
-    #[test_case(8)]
-    #[test_case(9)]
-    #[test_case(10)]
-    #[test_case(11)]
-    #[test_case(12)]
-    #[test_case(13)]
-    #[test_case(14)]
-    #[test_case(15)]
-    #[test_case(16)]
-    #[test_case(17)]
-    #[test_case(18)]
-    #[test_case(19)]
-    #[test_case(20)]
-    fn test_solve_benchmark(n: u8) {
-        let file = dbg!(format!("uf20-91/uf20-0{n}.cnf"));
-        solve_file(file);
-    }
+    // #[test_case(1)]
+    // #[test_case(2)]
+    // #[test_case(3)]
+    // #[test_case(4)]
+    // #[test_case(5)]
+    // #[test_case(6)]
+    // #[test_case(7)]
+    // #[test_case(8)]
+    // #[test_case(9)]
+    // #[test_case(10)]
+    // #[test_case(11)]
+    // #[test_case(12)]
+    // #[test_case(13)]
+    // #[test_case(14)]
+    // #[test_case(15)]
+    // #[test_case(16)]
+    // #[test_case(17)]
+    // #[test_case(18)]
+    // #[test_case(19)]
+    // #[test_case(20)]
+    // fn test_solve_benchmark(n: u8) {
+    // // download these files from
+    // // https://www.cs.ubc.ca/~hoos/SATLIB/benchm.html
+    //     let file = dbg!(format!("uf20-91/uf20-0{n}.cnf"));
+    //     solve_file(file);
+    // }
 }
